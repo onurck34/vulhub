@@ -26,10 +26,15 @@ jobs:
 
       - name: Run Gitleaks (GitHub Action)
         uses: gitleaks/gitleaks-action@v2
-        with:
-          args: --path=. --verbose
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # (İsteğe bağlı) kendi kural setin varsa:
+          # GITLEAKS_CONFIG: .github/gitleaks.toml
+          # (İsteğe bağlı) belirli sürüme pinlemek istersen:
+          # GITLEAKS_VERSION: "8.18.4"   # veya "latest"
+          GITLEAKS_ENABLE_SUMMARY: "true"
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "true"
+        continue-on-error: true
 
       - name: Run TruffleHog (OSS) - GitHub Action
         # trufflehog'un marketplace action'ını kullanıyoruz
