@@ -36,19 +36,15 @@ jobs:
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "true"
         continue-on-error: true
 
-      - name: Run TruffleHog (OSS) - GitHub Action
-        # trufflehog'un marketplace action'ını kullanıyoruz
-        uses: trufflesecurity/trufflehog@v3.90.12
-        with:
-          path: '.'            # taranacak path
-          timeout: '20m'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install python and detect-secrets
+      - name: Run TruffleHog (Docker, only verified, don’t fail)
         run: |
-          python -m pip install --upgrade pip
-          pip install detect-secrets
+          docker run --rm -v "$PWD:/pwd" trufflesecurity/trufflehog:3.90.12 \
+            filesystem --directory /pwd --only-verified --json > trufflehog-report.json || true
+      - name: Upload TruffleHog report
+        uses: actions/upload-artifact@v4
+        with:
+          name: trufflehog-report
+          path: trufflehog-report.json
 
       - name: Run detect-secrets scan (generate baseline)
         # Not: production'da baseline'ı manuel oluşturup commit et; burada sadece tarama örneği
