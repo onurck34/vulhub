@@ -33,7 +33,7 @@ jobs:
 
       - name: Run TruffleHog (OSS) - GitHub Action
         # trufflehog'un marketplace action'ını kullanıyoruz
-        uses: trufflesecurity/trufflehog@v3
+        uses: trufflesecurity/trufflehog@v3.90.12
         with:
           path: '.'            # taranacak path
           timeout: '20m'
