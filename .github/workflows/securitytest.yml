@@ -1,4 +1,4 @@
-name: Secret Scanning (Gitleaks)
+name: Secret Scanning (Gitleaks → Code Scanning)
 
 on:
   # push:
@@ -9,21 +9,27 @@ on:
 
 permissions:
   contents: read
+  security-events: write   # SARIF yüklemek için gerekli
 
 jobs:
   gitleaks-scan:
-    name: Run Gitleaks Secret Scan
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
+      - name: Checkout repo (full history)
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # git geçmişini de tara
+          fetch-depth: 0
 
-      - name: Run Gitleaks scan
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_ENABLE_SUMMARY: "true"     # sonuçları Actions özetinde göster
-          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "true"  # raporu artifact olarak kaydet
+      - name: Run Gitleaks (create SARIF, don't fail pipeline)
+        run: |
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest \
+            detect --source /repo \
+            --report-format sarif \
+            --report-path /repo/gitleaks.sarif \
+            --no-banner || true
+
+      - name: Upload SARIF to GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: gitleaks.sarif
