@@ -1,0 +1,119 @@
+name: Security Pipeline (SAST, Secrets, Container)
+
+on:
+  # push:
+  #   branches: [ "main", "master" ]
+  # pull_request:
+  #   branches: [ "main", "master" ]
+  # schedule:
+  #   - cron: "0 3 * * 1"   # Her Pazartesi 06:00 TR (UTC+3)
+  workflow_dispatch:
+    
+permissions:
+  contents: read
+  actions: read
+  security-events: write
+  packages: read
+ 
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # --- SAST (CodeQL for JS/TS) ---
+  codeql-jsts:
+    name: SAST (CodeQL JS/TS - security-extended)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL (JS/TS)
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript         # TypeScript'i de kapsar
+          queries: +security-extended
+          build-mode: none              # JS/TS için build gerekmez
+
+      - name: Analyze (JS/TS)
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript"
+
+# --- Secrets (TruffleHog - nonblocking) ---
+  trufflehog:
+    name: Secrets (TruffleHog - nonblocking)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+  
+      - name: Create .trufflehogignore
+        run: |
+          cat > .trufflehogignore <<'EOF'
+          test/**
+          tests/**
+          **/*.zip
+          **/*.tar
+          **/*.tgz
+          **/*.jar
+          **/*.gz
+          **/*.7z
+          EOF
+  
+      - name: Run TruffleHog (git history, do not fail)
+        run: |
+          trufflehog git \
+            --only-verified \
+            --exclude-paths .trufflehogignore \
+            --json . > trufflehog.json || true
+        continue-on-error: true
+  
+      - name: Upload TruffleHog report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trufflehog.json
+          path: trufflehog.json
+
+  # --- Container Image Tarama (Trivy + Grype) ---
+  container-scan:
+    name: Container Scan (Trivy + Grype)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image
+        run: |
+          docker build -t app-under-test:ci .
+
+      - name: Trivy scan (image)
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$PWD:/work" -w /work \
+            aquasec/trivy:latest image \
+            --scanners vuln \
+            --format sarif \
+            --output trivy.sarif \
+            app-under-test:ci || true
+
+      - name: Upload SARIF (Trivy)
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy.sarif
+          category: trivy
+
+      - name: Grype scan (image)
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            anchore/grype:latest \
+            app-under-test:ci -o sarif > grype.sarif || true
+
+      - name: Upload SARIF (Grype)
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: grype.sarif
+          category: grype
