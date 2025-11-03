@@ -1,4 +1,4 @@
-name: Security Pipeline - TruffleHog only
+name: Secret Scanning (Gitleaks)
 
 on:
   # push:
@@ -6,84 +6,24 @@ on:
   # pull_request:
   #   branches: ["main", "master"]
   workflow_dispatch:
-  # schedule:
-  #   - cron: "0 3 * * 1" # haftalık (istemiyorsan kaldır)
-  
 
 permissions:
   contents: read
 
 jobs:
-  trufflehog-scan:
-    name: TruffleHog Secret Scan (filesystem + git)
+  gitleaks-scan:
+    name: Run Gitleaks Secret Scan
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repo (full history for git scan)
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0   # git geçmişini de tara
 
-      - name: Create .trufflehogignore (ignore common noisy paths)
-        run: |
-          cat > .trufflehogignore <<'EOF'
-          node_modules/
-          vendor/
-          dist/
-          build/
-          *.min.js
-          *.lock
-          .git/
-          EOF
-
-      - name: Ensure Docker is available
-        run: docker version
-
-      - name: Run TruffleHog (filesystem scan) -> JSON (non-failing)
-        run: |
-          # filesystem modu: daha hızlı, çalışma dizinini tarar
-          docker run --rm -v "$PWD:/pwd" trufflesecurity/trufflehog:3.90.12 \
-            filesystem --directory /pwd --json --exclude-paths /pwd/.trufflehogignore \
-            > trufflehog-filesystem.ndjson || true
-
-      - name: Run TruffleHog (git history scan) -> JSON (non-failing)
-        run: |
-          # git modu: geçmişi tarar (daha yavaş). fetch-depth:0 gerekti.
-          docker run --rm -v "$PWD:/pwd" trufflesecurity/trufflehog:3.90.12 \
-            git --repo-path /pwd --json \
-            > trufflehog-git.ndjson || true
-
-      - name: Install jq (for parsing NDJSON)
-        run: sudo apt-get update -y && sudo apt-get install -y jq
-
-      - name: Count VERIFIED findings and fail if any
-        run: |
-          # merge NDJSON files into arrays, count verified==true
-          # If files are empty or invalid, fallback to 0
-          FILES="trufflehog-filesystem.ndjson trufflehog-git.ndjson"
-          VERIFIED_TOTAL=0
-          for f in $FILES; do
-            if [ -s "$f" ]; then
-              # slurp (-s) turns lines into array elements; select .verified==true
-              COUNT=$(jq -s '[ .[] | select(.verified == true) ] | length' "$f" 2>/dev/null || echo 0)
-            else
-              COUNT=0
-            fi
-            echo "Verified in $f : $COUNT"
-            VERIFIED_TOTAL=$((VERIFIED_TOTAL + COUNT))
-          done
-          echo "VERIFIED_TOTAL=$VERIFIED_TOTAL"
-          if [ "$VERIFIED_TOTAL" -gt 0 ]; then
-            echo "❌ Doğrulanmış (verified) secret tespit edildi: $VERIFIED_TOTAL"
-            # raporu artifact olarak bırakıp job'u fail et
-            exit 1
-          else
-            echo "✅ Verified secret yok: $VERIFIED_TOTAL"
-          fi
-
-      - name: Upload TruffleHog reports
-        uses: actions/upload-artifact@v4
-        with:
-          name: trufflehog-reports
-          path: |
-            trufflehog-filesystem.ndjson
-            trufflehog-git.ndjson
+      - name: Run Gitleaks scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_SUMMARY: "true"     # sonuçları Actions özetinde göster
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "true"  # raporu artifact olarak kaydet
